@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Docker Containers</title>
+
+    <style>
+        #vnc-frame {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 50%;
+            height: 100%;
+            border: none;
+            z-index: 1;
+        }
+        .button-container {
+        display: flex;
+        gap: 10px; /* Adjust the gap between buttons as needed */
+    }
+
+    .button-container form {
+        margin: 0;
+    }
+
+            /* Add styles for table cells */
+            table {
+            border-collapse: collapse;
+        }
+
+        th, td {
+            border: 1px solid gray; /* Add gray border to cells */
+            padding: 8px; /* Add padding to cells for spacing */
+            text-align: left; /* Align text to the left within cells */
+        }
+    </style>
+    
+</head>
+<body>
+    <button id="modeToggle">Toggle Mode</button>
+    <div id="left-pane">
+        <h1>Running Containers</h1>
+        <table>
+            <tr>
+                <th>Container ID</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Notes</th> <!-- Added column for Notes -->
+                <th>CPU %</th>
+                <th>MEM USAGE / LIMIT</th>
+                <th>MEM %</th>
+                <th>NET I/O</th>
+                <th>BLOCK I/O</th>
+                <th>PIDS</th>
+                <th>Actions</th>
+            </tr>
+            {% for container in running_containers %}
+            <tr>
+                <td>{{ container.id }}</td>
+                <td>{{ container.name }}</td>
+                <td>{{ container.status }}</td>
+                <td>
+                    <form method="POST" action="/update_notes">
+                        <input type="hidden" name="container_id" value="{{ container.id }}">
+                        <textarea name="updated_notes" rows="3" cols="30">{{ get_container_notes(container.id) }}</textarea>
+                        <button type="submit">Save Notes</button>
+                    </form>                    
+                </td>
+                <td>
+                    <form method="POST" action="/view_logs">
+                        <input type="hidden" name="container_id" value="{{ container.id }}">
+                        <button type="submit">View Logs</button>
+                    </form>
+                    <form method="POST" action="/stop_container">
+                        <input type="hidden" name="container_id" value="{{ container.id }}">
+                        <button type="submit">Stop Container</button>
+                    </form>
+                    <form method="POST" action="/connect_vnc">
+                        <input type="hidden" name="container_id" value="{{ container.id }}">
+                        <button type="submit">Connect VNC</button>
+                    </form>
+                </td>
+            
+                {% if container_stats[container.id] %}
+                <td>{{ container_stats[container.id]['cpu_stats']['cpu_usage']['usage_in_usermode'] }}</td>
+                <td>{{ container_stats[container.id]['memory_stats']['usage'] }} / {{ container_stats[container.id]['memory_stats']['limit'] }}</td>
+                <td>{{ container_stats[container.id]['memory_stats']['usage'] / container_stats[container.id]['memory_stats']['limit'] * 100 | round(2) }}%</td>
+                <td>{{ container_stats[container.id]['networks']['eth0']['rx_bytes'] | filesizeformat }} / {{ container_stats[container.id]['networks']['eth0']['tx_bytes'] | filesizeformat }}</td>
+                <td>{{ container_stats[container.id]['blkio_stats']['io_service_bytes_recursive'][0]['value'] | filesizeformat }} / {{ container_stats[container.id]['blkio_stats']['io_service_bytes_recursive'][1]['value'] | filesizeformat }}</td>
+                <td>{{ container_stats[container.id]['pids_stats']['current'] }}</td>
+
+                {% else %}
+                <td colspan="7">N/A</td>
+                {% endif %}
+            </tr>
+            
+            {% endfor %}
+        </table>
+        
+
+        <h1>Stopped Containers</h1>
+        <table>
+            <tr>
+                <th>Container ID</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+            {% for container in stopped_containers %}
+            <tr>
+                <td>{{ container.id }}</td>
+                <td>{{ container.name }}</td>
+                <td>{{ container.status }}</td>
+                <td>
+                    <div class="button-container">
+                        <form method="POST" action="/view_logs">
+                            <input type="hidden" name="container_id" value="{{ container.id }}">
+                            <button type="submit">View Logs</button>
+                        </form>
+                        <form method="POST" action="/start_container"> <!-- Added new form for starting -->
+                            <input type="hidden" name="container_id" value="{{ container.id }}">
+                            <button type="submit">Start</button>
+                        </form>
+                        <form method="POST" action="/archive_container">
+                            <input type="hidden" name="container_id" value="{{ container.id }}">
+                            <button type="submit">Archive</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+
+        <form method="POST" action="/create_container">
+            <label for="container_name">Container Name:</label>
+            <input type="text" id="container_name" name="container_name"><br>
+        
+            <label for="notes">Notes:</label>
+            <textarea id="notes" name="notes"></textarea><br>
+        
+            <button type="submit">Create Docker Container</button>
+        </form>
+
+
+        <h1>Archived Containers</h1>
+    <table>
+        <tr>
+            <th>Archived File</th>
+            <th>Actions</th>
+        </tr>
+        {% for archived_file in archived_files %}
+        <tr>
+            <td>{{ archived_file }}</td>
+            <td>
+                <div class="button-container">
+                    <form method="POST" action="/create_from_archive">
+                        <input type="hidden" name="archived_file" value="{{ archived_file }}">
+                        <button type="submit">Create</button>
+                    </form>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>    
+    </div>
+
+
+</body>
+
+<script>
+    const heading = document.getElementById('heading');
+    const modeToggle = document.getElementById('modeToggle');
+
+    let isDarkMode = false;
+
+    modeToggle.addEventListener('click', function() {
+        isDarkMode = !isDarkMode;
+        
+        if (isDarkMode) {
+            document.body.style.backgroundColor = '#333'; // Dark background
+                document.body.style.color = '#FFF'; // White text color
+                heading.style.color = '#FFF'; // White heading text color
+                modeToggle.style.backgroundColor = '#222'; // Darker button background
+                modeToggle.style.color = '#FFF'; // White button text color
+                usernameInput.style.backgroundColor = '#666'; // Gray input background
+                usernameInput.style.color = '#FFF'; // White input text color
+            } else {
+                document.body.style.backgroundColor = '#FFF'; // Light background
+                document.body.style.color = '#333'; // Dark text color
+                heading.style.color = '#333'; // Dark heading text color
+                modeToggle.style.backgroundColor = '#333'; // Dark button background
+                modeToggle.style.color = '#FFF'; // White button text color
+                usernameInput.style.backgroundColor = '#EEE'; // Light gray input background
+                usernameInput.style.color = '#333'; // Dark input text color
+            }
+        });
+    </script>
+</html>
